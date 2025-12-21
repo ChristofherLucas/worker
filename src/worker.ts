@@ -181,8 +181,8 @@ async function sendMessage(
   evolutionInstance: string
 ): Promise<void> {
   const evolutionConfig = {
-    serverUrl: process.env.NEXT_PUBLIC_EVOLUTION_API_URL!,
-    apiKey: process.env.NEXT_PUBLIC_EVOLUTION_API_KEY!,
+    serverUrl: process.env.EVOLUTION_API_URL!,
+    apiKey: process.env.EVOLUTION_API_KEY!,
     instance: evolutionInstance,
   };
 
@@ -242,10 +242,10 @@ async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void>
   let data;
   try {
     const response = await axios.get(
-      `${process.env.NEXT_PUBLIC_EVOLUTION_API_URL}/instance/connectionState/${evolutionInstance}`,
+      `${process.env.EVOLUTION_API_URL}/instance/connectionState/${evolutionInstance}`,
       {
         headers: {
-          apikey: process.env.NEXT_PUBLIC_EVOLUTION_API_KEY!,
+          apikey: process.env.EVOLUTION_API_KEY!,
         },
       }
     );
@@ -289,6 +289,7 @@ export const messageWorker = new Worker("message-processing", processOrderMessag
   connection: redisConnection,
   concurrency: 1,
   lockDuration: 5 * 60 * 1000,
+  autorun: true,
 });
 
 messageWorker.on("failed", (job, err) => {
