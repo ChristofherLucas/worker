@@ -1,7 +1,7 @@
 import { Worker, type Job } from "bullmq";
 import "dotenv/config";
 import axios from "axios";
-import { RedisOptions } from "ioredis";
+import IORedis from "ioredis";
 
 interface OrderItem {
   quantity: number;
@@ -35,21 +35,12 @@ export interface OrderMessageJobData {
   evolutionInstance: string;
 }
 
-const redisConnection: RedisOptions = process.env.REDIS_URL
-  ? {
-      host: new URL(process.env.REDIS_URL).hostname,
-      port: Number(new URL(process.env.REDIS_URL).port) || 6379,
-      password: new URL(process.env.REDIS_URL).password,
-      tls: {},
-
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-      keepAlive: 10000,
-    }
-  : {
-      host: "127.0.0.1",
-      port: 6379,
-    };
+const redisConnection = new IORedis(process.env.REDIS_URL!, {
+  tls: {},
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+  keepAlive: 10000,
+});
 // Calcula o preço de um item, considerando sabores de pizza e tipo de precificação
 function calculateItemPrice(item: any): number {
   // Suporte tanto para pizzaFlavors (frontend) quanto orderItemPizzaFlavors (backend)
