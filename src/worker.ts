@@ -1,6 +1,7 @@
-import { RedisOptions, Worker, type Job } from "bullmq";
+import { Worker, type Job } from "bullmq";
 import "dotenv/config";
 import axios from "axios";
+import { RedisOptions } from "ioredis";
 
 interface OrderItem {
   quantity: number;
@@ -41,7 +42,6 @@ const redisConnection: RedisOptions = process.env.REDIS_URL
       password: new URL(process.env.REDIS_URL).password,
       tls: {},
 
-      // 🔥 ESSENCIAIS PARA UPSTASH
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
       keepAlive: 10000,

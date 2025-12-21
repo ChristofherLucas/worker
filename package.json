@@ -24,6 +24,7 @@
     "axios": "^1.13.2",
     "bullmq": "^5.66.2",
     "dotenv": "^17.2.3",
+    "ioredis": "^5.8.2",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
