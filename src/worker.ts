@@ -1,4 +1,4 @@
-import { Worker, type Job } from "bullmq";
+import { RedisOptions, Worker, type Job } from "bullmq";
 import "dotenv/config";
 import axios from "axios";
 
@@ -34,6 +34,22 @@ export interface OrderMessageJobData {
   evolutionInstance: string;
 }
 
+const redisConnection: RedisOptions = process.env.REDIS_URL
+  ? {
+      host: new URL(process.env.REDIS_URL).hostname,
+      port: Number(new URL(process.env.REDIS_URL).port) || 6379,
+      password: new URL(process.env.REDIS_URL).password,
+      tls: {},
+
+      // 🔥 ESSENCIAIS PARA UPSTASH
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      keepAlive: 10000,
+    }
+  : {
+      host: "127.0.0.1",
+      port: 6379,
+    };
 // Calcula o preço de um item, considerando sabores de pizza e tipo de precificação
 function calculateItemPrice(item: any): number {
   // Suporte tanto para pizzaFlavors (frontend) quanto orderItemPizzaFlavors (backend)
@@ -271,7 +287,7 @@ async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void>
 }
 
 export const messageWorker = new Worker("message-processing", processOrderMessage, {
-  connection: { url: process.env.REDIS_URL },
+  connection: redisConnection,
   concurrency: 1,
   lockDuration: 5 * 60 * 1000,
   autorun: true,
