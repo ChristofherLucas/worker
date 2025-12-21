@@ -34,21 +34,6 @@ export interface OrderMessageJobData {
   evolutionInstance: string;
 }
 
-const redisConnection = process.env.REDIS_URL
-  ? (() => {
-      const url = new URL(process.env.REDIS_URL);
-      return {
-        host: url.hostname,
-        port: Number(url.port) || 6379,
-        password: url.password || undefined,
-      };
-    })()
-  : {
-      host: process.env.REDIS_HOST || "127.0.0.1",
-      port: Number(process.env.REDIS_PORT) || 6379,
-      password: process.env.REDIS_PASSWORD,
-    };
-
 // Calcula o preço de um item, considerando sabores de pizza e tipo de precificação
 function calculateItemPrice(item: any): number {
   // Suporte tanto para pizzaFlavors (frontend) quanto orderItemPizzaFlavors (backend)
@@ -286,7 +271,7 @@ async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void>
 }
 
 export const messageWorker = new Worker("message-processing", processOrderMessage, {
-  connection: redisConnection,
+  connection: { url: process.env.REDIS_URL },
   concurrency: 1,
   lockDuration: 5 * 60 * 1000,
   autorun: true,
