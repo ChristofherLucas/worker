@@ -283,8 +283,9 @@ const queue = new Queue("message-processing", {
 export const messageWorker = new Worker("message-processing", processOrderMessage, {
   connection: redisConnection,
   concurrency: 1,
-  lockDuration: 5 * 60 * 1000,
+  lockDuration: 60000,
   autorun: true,
+  maxStalledCount: 2,
 });
 
 messageWorker.on("completed", async () => {
