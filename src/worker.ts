@@ -1,4 +1,4 @@
-import { Worker, type Job } from "bullmq";
+import { Queue, Worker, type Job } from "bullmq";
 import "dotenv/config";
 import axios from "axios";
 import IORedis from "ioredis";
@@ -41,9 +41,8 @@ const redisConnection = new IORedis(process.env.REDIS_URL!, {
   enableReadyCheck: false,
   keepAlive: 10000,
 });
-// Calcula o preço de um item, considerando sabores de pizza e tipo de precificação
+
 function calculateItemPrice(item: any): number {
-  // Suporte tanto para pizzaFlavors (frontend) quanto orderItemPizzaFlavors (backend)
   const pizzaFlavors = item.pizzaFlavors || item.orderItemPizzaFlavors;
   if (pizzaFlavors && pizzaFlavors.length > 0) {
     const flavorPrices = pizzaFlavors.map((f: any) => f.price);
@@ -53,7 +52,7 @@ function calculateItemPrice(item: any): number {
       return flavorPrices.reduce((sum: number, price: number) => sum + price, 0);
     } else if (pricingType === "average") {
       return Math.round(
-        flavorPrices.reduce((sum: number, price: number) => sum + price, 0) / flavorPrices.length
+        flavorPrices.reduce((sum: number, price: number) => sum + price, 0) / flavorPrices.length,
       );
     } else if (pricingType === "max") {
       return Math.max(...flavorPrices);
@@ -73,7 +72,7 @@ function calculateOrderTotal(order: OrderData): number {
     if (complements && Array.isArray(complements)) {
       complementsTotal += complements.reduce(
         (compAcc: number, comp: any) => compAcc + (comp.price ?? 0) * comp.quantity,
-        0
+        0,
       );
     }
     // O valor total do item é (preço do item + total dos complementos) * quantidade
@@ -83,7 +82,7 @@ function calculateOrderTotal(order: OrderData): number {
 
 function formatOrderMessage(
   order: OrderData,
-  type: "ORDER_CREATED" | "ORDER_STATUS_UPDATED"
+  type: "ORDER_CREATED" | "ORDER_STATUS_UPDATED",
 ): string {
   const total = calculateOrderTotal(order);
   const totalFormatted = (total / 100).toLocaleString("pt-BR", {
@@ -142,15 +141,15 @@ function formatOrderMessage(
             })})*`
           : "*Dinheiro (não precisa de troco)*"
         : order.paymentMethod === "pix"
-        ? "*Pix*"
-        : "*Cartão*"
+          ? "*Pix*"
+          : "*Cartão*"
     }
 🛵 ${
       order.deliveryMethodCode === "delivery"
         ? "*Delivery*"
         : order.deliveryMethodCode === "pickup"
-        ? "*Retirada no local*"
-        : "*Consumo no local*"
+          ? "*Retirada no local*"
+          : "*Consumo no local*"
     }
 
 Total *${totalFormatted}*
@@ -170,7 +169,7 @@ Obrigado pela preferência, se precisar de algo é só chamar! 😉`;
 async function sendMessage(
   message: string,
   customerPhone: string,
-  evolutionInstance: string
+  evolutionInstance: string,
 ): Promise<void> {
   const evolutionConfig = {
     serverUrl: process.env.EVOLUTION_API_URL!,
@@ -190,7 +189,7 @@ async function sendMessage(
           "Content-Type": "application/json",
           apikey: evolutionConfig.apiKey,
         },
-      }
+      },
     );
   } catch (error: any) {
     if (error.response) {
@@ -226,7 +225,7 @@ async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void>
   const { order, type, evolutionInstance } = job.data;
 
   await job.log(
-    `Starting processing for order ${order.code} of type ${type} and sequence ${job.data.sequence}`
+    `Starting processing for order ${order.code} of type ${type} and sequence ${job.data.sequence}`,
   );
 
   const message = formatOrderMessage(order, type);
@@ -239,13 +238,13 @@ async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void>
         headers: {
           apikey: process.env.EVOLUTION_API_KEY!,
         },
-      }
+      },
     );
     data = response.data;
   } catch (error: any) {
     if (error.response) {
       const err = new Error(
-        `Evolution API error: ${error.response.status} - ${error.response.data}`
+        `Evolution API error: ${error.response.status} - ${error.response.data}`,
       );
       (err as any).status = error.response.status;
       throw err;
@@ -256,7 +255,7 @@ async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void>
 
   if (!data?.instance.state || data.instance.state !== "open") {
     await job.log(
-      `Evolution instance ${evolutionInstance} not ready, delaying job (order ${order.code}).`
+      `Evolution instance ${evolutionInstance} not ready, delaying job (order ${order.code}).`,
     );
     await job.updateProgress({ status: "waiting_instance" });
     const delay = 60000 + Math.random() * 60000;
@@ -277,11 +276,26 @@ async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void>
   }
 }
 
+const queue = new Queue("message-processing", {
+  connection: redisConnection,
+});
+
 export const messageWorker = new Worker("message-processing", processOrderMessage, {
   connection: redisConnection,
   concurrency: 1,
   lockDuration: 5 * 60 * 1000,
   autorun: true,
+});
+
+messageWorker.on("completed", async () => {
+  const waiting = await queue.getWaitingCount();
+  const activer = await queue.getActiveCount();
+  const delayed = await queue.getDelayedCount();
+
+  if (waiting + activer + delayed === 0) {
+    console.log("Sem jobs — worker encerrado.");
+    await messageWorker.close();
+  }
 });
 
 messageWorker.on("failed", (job, err) => {
