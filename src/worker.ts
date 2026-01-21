@@ -36,7 +36,6 @@ export interface OrderMessageJobData {
 }
 
 const redisConnection = new IORedis(process.env.REDIS_URL!, {
-  tls: {},
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
   keepAlive: 10000,
