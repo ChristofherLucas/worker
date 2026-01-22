@@ -2,6 +2,10 @@ import { Worker, type Job } from "bullmq";
 import "dotenv/config";
 import axios from "axios";
 
+/* =========================
+   Tipos
+========================= */
+
 interface OrderItem {
   quantity: number;
   name: string;
@@ -34,6 +38,10 @@ export interface OrderMessageJobData {
   evolutionInstance: string;
 }
 
+/* =========================
+   Redis / BullMQ
+========================= */
+
 const connection = {
   host: process.env.REDIS_HOST!,
   port: Number(process.env.REDIS_PORT!),
@@ -43,43 +51,42 @@ const connection = {
   keepAlive: 30000,
 };
 
+/* =========================
+   Helpers
+========================= */
+
 function calculateItemPrice(item: any): number {
   const pizzaFlavors = item.pizzaFlavors || item.orderItemPizzaFlavors;
-  if (pizzaFlavors && pizzaFlavors.length > 0) {
-    const flavorPrices = pizzaFlavors.map((f: any) => f.price);
-    const pricingType = item.pizzaPricingType || item.pizzaConfig?.pricingType || "average";
+  if (pizzaFlavors?.length) {
+    const prices = pizzaFlavors.map((f: any) => f.price);
+    const type = item.pizzaPricingType || item.pizzaConfig?.pricingType || "average";
 
-    if (pricingType === "sum") {
-      return flavorPrices.reduce((sum: number, price: number) => sum + price, 0);
-    } else if (pricingType === "average") {
-      return Math.round(
-        flavorPrices.reduce((sum: number, price: number) => sum + price, 0) / flavorPrices.length,
-      );
-    } else if (pricingType === "max") {
-      return Math.max(...flavorPrices);
-    }
+    if (type === "sum") return prices.reduce((a: number, b: number) => a + b, 0);
+    if (type === "max") return Math.max(...prices);
+
+    return Math.round(prices.reduce((a: number, b: number) => a + b, 0) / prices.length);
   }
+
   return item.price ?? 0;
 }
 
-// Calcula o total do pedido, incluindo complementos
 function calculateOrderTotal(order: OrderData): number {
   return order.items.reduce((acc: number, item: any) => {
-    // Preço do item (considerando sabores de pizza e regra de precificação)
     const itemPrice = calculateItemPrice(item);
-    // Complementos: suporta tanto orderItemComplements (backend) quanto complements (frontend)
-    let complementsTotal = 0;
-    const complements = item.complements || item.orderItemComplements;
-    if (complements && Array.isArray(complements)) {
-      complementsTotal += complements.reduce(
-        (compAcc: number, comp: any) => compAcc + (comp.price ?? 0) * comp.quantity,
-        0,
-      );
-    }
-    // O valor total do item é (preço do item + total dos complementos) * quantidade
+    const complements = item.complements || item.orderItemComplements || [];
+
+    const complementsTotal = complements.reduce(
+      (sum: number, c: any) => sum + (c.price ?? 0) * c.quantity,
+      0,
+    );
+
     return acc + (itemPrice + complementsTotal) * item.quantity;
   }, 0);
 }
+
+/* =========================
+   Mensagem
+========================= */
 
 function formatOrderMessage(
   order: OrderData,
@@ -91,199 +98,143 @@ function formatOrderMessage(
     currency: "BRL",
   });
 
-  let message = "";
-
-  if (type === "ORDER_CREATED") {
-    message = `Pedido *n° ${order.code}*
-
-*Itens:*
-`;
-
-    for (const item of order.items) {
-      const itemQuantity = item.quantity > 1 ? `${item.quantity}x ` : "";
-      message += `📦 \`\`\`${itemQuantity}${item.name}\`\`\``;
-
-      // Sabores de pizza (pizzaFlavors ou orderItemPizzaFlavors)
-      const pizzaFlavors = (item as any)["pizzaFlavors"] || (item as any)["orderItemPizzaFlavors"];
-      if (pizzaFlavors && pizzaFlavors.length > 0) {
-        message += "\n     _Sabores_";
-        const fraction = `1/${pizzaFlavors.length}`;
-        for (const flavor of pizzaFlavors) {
-          message += `\n           \`\`\`${fraction} ${flavor.name}\`\`\``;
-        }
-      }
-
-      if (item.orderItemComplements && item.orderItemComplements.length > 0) {
-        message += "\n     _Complementos_";
-        for (const complement of item.orderItemComplements) {
-          const complementQuantity = complement.quantity > 1 ? `${complement.quantity}x ` : "";
-          message += `\n           \`\`\`${complementQuantity}${complement.name}\`\`\``;
-        }
-      }
-
-      if (item.notes) {
-        message += `\n\n*OBS:* ${item.notes}\n`;
-      }
-      message += "\n";
-    }
-
-    if (order.notes) {
-      message += `\n*OBS:* ${order.notes}`;
-    }
-
-    message += `${order.notes ? "\n" : ""}\n${
-      order.paymentMethod === "cash" || order.paymentMethod === "pix" ? "💵" : "💳"
-    } ${
-      order.paymentMethod === "cash"
-        ? order.change
-          ? `*Dinheiro (troco para ${(order.change / 100).toLocaleString("pt-BR", {
-              style: "currency",
-              currency: "BRL",
-            })})*`
-          : "*Dinheiro (não precisa de troco)*"
-        : order.paymentMethod === "pix"
-          ? "*Pix*"
-          : "*Cartão*"
-    }
-🛵 ${
-      order.deliveryMethodCode === "delivery"
-        ? "*Delivery*"
-        : order.deliveryMethodCode === "pickup"
-          ? "*Retirada no local*"
-          : "*Consumo no local*"
-    }
-
-Total *${totalFormatted}*
-
-Obrigado pela preferência, se precisar de algo é só chamar! 😉`;
-  } else if (type === "ORDER_STATUS_UPDATED") {
+  if (type === "ORDER_STATUS_UPDATED") {
     if (order.status === "in_preparation") {
-      message = "Agora vai! Seu pedido já está *em produção* 🥳";
-    } else if (order.status === "completed") {
-      message = "Tô chegando! Seu pedido já está na rota de *entrega* 🛵";
+      return "Agora vai! Seu pedido já está *em produção* 🥳";
     }
+    if (order.status === "completed") {
+      return "Tô chegando! Seu pedido já está na rota de *entrega* 🛵";
+    }
+    return "";
   }
+
+  let message = `Pedido *n° ${order.code}*\n\n*Itens:*\n`;
+
+  for (const item of order.items) {
+    const qty = item.quantity > 1 ? `${item.quantity}x ` : "";
+    message += `📦 \`\`\`${qty}${item.name}\`\`\`\n`;
+
+    const flavors = (item as any).pizzaFlavors || (item as any).orderItemPizzaFlavors;
+    if (flavors?.length) {
+      message += "     _Sabores_\n";
+      const fraction = `1/${flavors.length}`;
+      for (const f of flavors) {
+        message += `           \`\`\`${fraction} ${f.name}\`\`\`\n`;
+      }
+    }
+
+    if (item.orderItemComplements?.length) {
+      message += "     _Complementos_\n";
+      for (const c of item.orderItemComplements) {
+        const cQty = c.quantity > 1 ? `${c.quantity}x ` : "";
+        message += `           \`\`\`${cQty}${c.name}\`\`\`\n`;
+      }
+    }
+
+    if (item.notes) {
+      message += `\n*OBS:* ${item.notes}\n`;
+    }
+
+    message += "\n";
+  }
+
+  if (order.notes) {
+    message += `*OBS:* ${order.notes}\n\n`;
+  }
+
+  message += `Total *${totalFormatted}*\n\nObrigado pela preferência! 😉`;
 
   return message;
 }
+
+/* =========================
+   Provider
+========================= */
 
 async function sendMessage(
   message: string,
   customerPhone: string,
   evolutionInstance: string,
 ): Promise<void> {
-  const evolutionConfig = {
-    serverUrl: process.env.EVOLUTION_API_URL!,
-    apiKey: process.env.EVOLUTION_API_KEY!,
-    instance: evolutionInstance,
-  };
-
   try {
     await axios.post(
-      `${evolutionConfig.serverUrl}/message/sendText/${evolutionConfig.instance}`,
-      {
-        number: customerPhone,
-        text: message,
-      },
+      `${process.env.EVOLUTION_API_URL}/message/sendText/${evolutionInstance}`,
+      { number: customerPhone, text: message },
       {
         headers: {
           "Content-Type": "application/json",
-          apikey: evolutionConfig.apiKey,
+          apikey: process.env.EVOLUTION_API_KEY!,
         },
       },
     );
   } catch (error: any) {
-    const status = error.response?.status;
-    const err = new Error(`Failed to send message: ${error.message}`) as any;
-
-    err.status = status;
-
+    const err = new Error(`Failed to send message`) as any;
+    err.status = error.response?.status;
+    err.original = error;
     throw err;
   }
 }
 
 function isTemporaryProviderError(error: any): boolean {
-  if (!error) return false;
-  if (error.name === "FetchError" || error.code === "ECONNRESET" || error.code === "ETIMEDOUT") {
-    return true;
-  }
   const status = error.status ?? error.response?.status;
-  if (typeof status === "number" && status >= 500) {
-    return true;
-  }
-  if (typeof error.message === "string") {
-    const msg = error.message.toLowerCase();
-    if (
-      msg.includes("timeout") ||
-      msg.includes("temporarily unavailable") ||
-      msg.includes("network")
-    ) {
-      return true;
-    }
-  }
-  return false;
+  if (status && status >= 500) return true;
+
+  return (
+    ["ECONNRESET", "ETIMEDOUT"].includes(error.code) ||
+    /timeout|network|temporarily/i.test(error.message ?? "")
+  );
 }
+
+/* =========================
+   Processor
+========================= */
 
 async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void> {
   const { order, type, evolutionInstance } = job.data;
 
-  await job.log(
-    `Starting processing for order ${order.code} of type ${type} and sequence ${job.data.sequence}`,
-  );
+  await job.log(`Processing order ${order.code} (${type})`);
 
   const message = formatOrderMessage(order, type);
 
-  let data;
+  // Verifica instância
+  let instanceState: any;
   try {
-    const response = await axios.get(
+    const res = await axios.get(
       `${process.env.EVOLUTION_API_URL}/instance/connectionState/${evolutionInstance}`,
-      {
-        headers: {
-          apikey: process.env.EVOLUTION_API_KEY!,
-        },
-      },
+      { headers: { apikey: process.env.EVOLUTION_API_KEY! } },
     );
-    data = response.data;
+    instanceState = res.data;
   } catch (error: any) {
     const status = error.response?.status;
     if (status === 404) {
-      await job.log(
-        `Evolution instance ${evolutionInstance} not found, delaying job (order ${order.code}).`,
-      );
-      return;
+      throw Object.assign(new Error("Evolution instance not found"), { status: 404 });
     }
-
     throw error;
   }
 
-  if (!data?.instance.state || data.instance.state !== "open") {
-    await job.log(
-      `Evolution instance ${evolutionInstance} not ready, delaying job (order ${order.code}).`,
-    );
-
+  if (instanceState?.instance?.state !== "open") {
     const err = new Error("Evolution instance not ready") as any;
     err.status = 503;
-    throw err;
+    throw err; // retry controlado
   }
 
   try {
     await sendMessage(message, order.customerPhone, evolutionInstance);
-    await job.log(`Message sent successfully for order ${order.code}`);
+    await job.log(`Message sent successfully`);
   } catch (err: any) {
-    const status = err.response?.status;
-    if (status === 404) {
-      await job.log(
-        `Evolution instance ${evolutionInstance} not found during message send, delaying job (order ${order.code}).`,
-      );
-      return;
+    if (err.status === 404) {
+      throw err; // falha definitiva
     }
-
     if (isTemporaryProviderError(err)) {
-      throw err;
+      throw err; // retry
     }
     throw err;
   }
 }
+
+/* =========================
+   Worker
+========================= */
 
 export const messageWorker = new Worker("message-processing", processOrderMessage, {
   connection,
@@ -294,16 +245,20 @@ export const messageWorker = new Worker("message-processing", processOrderMessag
 });
 
 messageWorker.on("completed", (job) => {
-  console.log(`Job ${job.id} completed successfully.`);
+  console.log(`Job ${job.id} completed`);
 });
 
 messageWorker.on("failed", (job, err) => {
-  console.error(`Job ${job?.id} falhou:`, err.message);
+  console.error(`Job ${job?.id} failed:`, err.message);
 });
 
 messageWorker.on("error", (err) => {
-  console.error("Erro no worker:", err);
+  console.error("Worker error:", err);
 });
+
+/* =========================
+   Shutdown
+========================= */
 
 async function shutdown() {
   console.log("Shutting down worker...");
