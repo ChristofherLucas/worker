@@ -1,4 +1,4 @@
-import { Queue, Worker, type Job } from "bullmq";
+import { Worker, type Job } from "bullmq";
 import "dotenv/config";
 import axios from "axios";
 
@@ -22,7 +22,7 @@ interface OrderData {
   paymentMethod: string;
   change?: number | null;
   status: string;
-  updatedAt: Date;
+  updatedAt: string | Date;
   deliveryMethodCode?: string | null;
   items: OrderItem[];
 }
@@ -39,7 +39,7 @@ const connection = {
   port: Number(process.env.REDIS_PORT!),
   password: process.env.REDIS_PASSWORD!,
   maxRetriesPerRequest: null,
-  enableReadyCheck: false,
+  enableReadyCheck: true,
   keepAlive: 30000,
 };
 
@@ -193,11 +193,12 @@ async function sendMessage(
       },
     );
   } catch (error: any) {
-    if (error.response) {
-      throw new Error(`Evolution API error: ${error.response.status} - ${error.response.data}`);
-    } else {
-      throw error;
-    }
+    const status = error.response?.status;
+    const err = new Error(`Failed to send message: ${error.message}`) as any;
+
+    err.status = status;
+
+    throw err;
   }
 }
 
@@ -206,7 +207,8 @@ function isTemporaryProviderError(error: any): boolean {
   if (error.name === "FetchError" || error.code === "ECONNRESET" || error.code === "ETIMEDOUT") {
     return true;
   }
-  if (typeof error.status === "number" && error.status >= 500) {
+  const status = error.status ?? error.response?.status;
+  if (typeof status === "number" && status >= 500) {
     return true;
   }
   if (typeof error.message === "string") {
@@ -243,37 +245,43 @@ async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void>
     );
     data = response.data;
   } catch (error: any) {
-    if (error.response) {
-      const err = new Error(
-        `Evolution API error: ${error.response.status} - ${error.response.data}`,
+    const status = error.response?.status;
+    if (status === 404) {
+      await job.log(
+        `Evolution instance ${evolutionInstance} not found, delaying job (order ${order.code}).`,
       );
-      (err as any).status = error.response.status;
-      throw err;
-    } else {
-      throw error;
+      return;
     }
+
+    throw error;
   }
 
   if (!data?.instance.state || data.instance.state !== "open") {
     await job.log(
       `Evolution instance ${evolutionInstance} not ready, delaying job (order ${order.code}).`,
     );
-    await job.updateProgress({ status: "waiting_instance" });
-    const delay = 60000 + Math.random() * 60000;
-    await job.moveToDelayed(Date.now() + delay);
-    return;
+
+    const err = new Error("Evolution instance not ready") as any;
+    err.status = 503;
+    throw err;
   }
 
   try {
-    await job.log(`Sending message for order ${order.code} to ${order.customerPhone}`);
     await sendMessage(message, order.customerPhone, evolutionInstance);
     await job.log(`Message sent successfully for order ${order.code}`);
   } catch (err: any) {
+    const status = err.response?.status;
+    if (status === 404) {
+      await job.log(
+        `Evolution instance ${evolutionInstance} not found during message send, delaying job (order ${order.code}).`,
+      );
+      return;
+    }
+
     if (isTemporaryProviderError(err)) {
       throw err;
     }
-    await job.log(`Message failed for order ${order.code}: ${err.message}`);
-    await job.moveToFailed(err, "message_send_failure");
+    throw err;
   }
 }
 
