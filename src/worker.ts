@@ -2,10 +2,6 @@ import { Worker, type Job } from "bullmq";
 import "dotenv/config";
 import axios from "axios";
 
-/* =========================
-   Tipos
-========================= */
-
 interface OrderItem {
   quantity: number;
   name: string;
@@ -38,10 +34,6 @@ export interface OrderMessageJobData {
   evolutionInstance: string;
 }
 
-/* =========================
-   Redis / BullMQ
-========================= */
-
 const connection = {
   host: process.env.REDIS_HOST!,
   port: Number(process.env.REDIS_PORT!),
@@ -50,10 +42,6 @@ const connection = {
   enableReadyCheck: true,
   keepAlive: 30000,
 };
-
-/* =========================
-   Helpers
-========================= */
 
 function calculateItemPrice(item: any): number {
   const pizzaFlavors = item.pizzaFlavors || item.orderItemPizzaFlavors;
@@ -83,10 +71,6 @@ function calculateOrderTotal(order: OrderData): number {
     return acc + (itemPrice + complementsTotal) * item.quantity;
   }, 0);
 }
-
-/* =========================
-   Mensagem
-========================= */
 
 function formatOrderMessage(
   order: OrderData,
@@ -147,10 +131,6 @@ function formatOrderMessage(
   return message;
 }
 
-/* =========================
-   Provider
-========================= */
-
 async function sendMessage(
   message: string,
   customerPhone: string,
@@ -185,10 +165,6 @@ function isTemporaryProviderError(error: any): boolean {
   );
 }
 
-/* =========================
-   Processor
-========================= */
-
 async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void> {
   const { order, type, evolutionInstance } = job.data;
 
@@ -196,7 +172,6 @@ async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void>
 
   const message = formatOrderMessage(order, type);
 
-  // Verifica instância
   let instanceState: any;
   try {
     const res = await axios.get(
@@ -215,7 +190,7 @@ async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void>
   if (instanceState?.instance?.state !== "open") {
     const err = new Error("Evolution instance not ready") as any;
     err.status = 503;
-    throw err; // retry controlado
+    throw err;
   }
 
   try {
@@ -223,20 +198,16 @@ async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void>
     await job.log(`Message sent successfully`);
   } catch (err: any) {
     if (err.status === 404) {
-      throw err; // falha definitiva
+      throw err;
     }
     if (isTemporaryProviderError(err)) {
-      throw err; // retry
+      throw err;
     }
     throw err;
   }
 }
 
-/* =========================
-   Worker
-========================= */
-
-export const messageWorker = new Worker("message-processing", processOrderMessage, {
+export const worker = new Worker("message-processing", processOrderMessage, {
   connection,
   concurrency: 1,
   lockDuration: 60000,
@@ -244,27 +215,14 @@ export const messageWorker = new Worker("message-processing", processOrderMessag
   maxStalledCount: 2,
 });
 
-messageWorker.on("completed", (job) => {
-  console.log(`Job ${job.id} completed`);
+worker.on("completed", (job) => {
+  console.log(`Job ${job?.id} completed`);
 });
 
-messageWorker.on("failed", (job, err) => {
+worker.on("failed", (job, err) => {
   console.error(`Job ${job?.id} failed:`, err.message);
 });
 
-messageWorker.on("error", (err) => {
+worker.on("error", (err) => {
   console.error("Worker error:", err);
 });
-
-/* =========================
-   Shutdown
-========================= */
-
-async function shutdown() {
-  console.log("Shutting down worker...");
-  await messageWorker.close();
-  process.exit(0);
-}
-
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
