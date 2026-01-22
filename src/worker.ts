@@ -37,7 +37,7 @@ export interface OrderMessageJobData {
 const connection = {
   host: process.env.REDIS_HOST!,
   port: Number(process.env.REDIS_PORT!),
-  password: process.env.REDIS_PASSWORD!,
+  // password: process.env.REDIS_PASSWORD!,
   maxRetriesPerRequest: null,
   enableReadyCheck: true,
   keepAlive: 30000,
@@ -83,7 +83,7 @@ function formatOrderMessage(
   });
 
   if (type === "ORDER_STATUS_UPDATED") {
-    if (order.status === "in_preparation") {
+    if (order.status === "in_production") {
       return "Agora vai! Seu pedido já está *em produção* 🥳";
     }
     if (order.status === "completed") {
