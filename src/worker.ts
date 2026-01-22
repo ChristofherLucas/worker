@@ -1,7 +1,11 @@
-import { Queue, Worker, type Job } from "bullmq";
-import "dotenv/config";
-import axios from "axios";
+import { Worker, type Job } from "bullmq";
 import IORedis from "ioredis";
+import axios from "axios";
+import "dotenv/config";
+
+/* =========================
+   Tipos
+========================= */
 
 interface OrderItem {
   quantity: number;
@@ -35,46 +39,47 @@ export interface OrderMessageJobData {
   evolutionInstance: string;
 }
 
-const redisConnection = new IORedis(process.env.REDIS_URL!, {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: false,
-  keepAlive: 10000,
-});
+/* =========================
+   Redis (CONEXÃO EXCLUSIVA)
+========================= */
+
+function createRedisConnection() {
+  return new IORedis(process.env.REDIS_URL!, {
+    maxRetriesPerRequest: null, // obrigatório para workers
+    enableReadyCheck: true,
+    keepAlive: 10000,
+    retryStrategy(times) {
+      return Math.min(times * 100, 2000);
+    },
+  });
+}
+
+const workerConnection = createRedisConnection();
+
+/* =========================
+   Helpers de negócio
+========================= */
 
 function calculateItemPrice(item: any): number {
   const pizzaFlavors = item.pizzaFlavors || item.orderItemPizzaFlavors;
-  if (pizzaFlavors && pizzaFlavors.length > 0) {
-    const flavorPrices = pizzaFlavors.map((f: any) => f.price);
-    const pricingType = item.pizzaPricingType || item.pizzaConfig?.pricingType || "average";
-
-    if (pricingType === "sum") {
-      return flavorPrices.reduce((sum: number, price: number) => sum + price, 0);
-    } else if (pricingType === "average") {
-      return Math.round(
-        flavorPrices.reduce((sum: number, price: number) => sum + price, 0) / flavorPrices.length,
-      );
-    } else if (pricingType === "max") {
-      return Math.max(...flavorPrices);
-    }
+  if (pizzaFlavors?.length) {
+    const prices = pizzaFlavors.map((f: any) => f.price);
+    const type = item.pizzaPricingType || item.pizzaConfig?.pricingType || "average";
+    if (type === "sum") return prices.reduce((a: number, b: number) => a + b, 0);
+    if (type === "max") return Math.max(...prices);
+    return Math.round(prices.reduce((a: number, b: number) => a + b, 0) / prices.length);
   }
   return item.price ?? 0;
 }
 
-// Calcula o total do pedido, incluindo complementos
 function calculateOrderTotal(order: OrderData): number {
-  return order.items.reduce((acc: number, item: any) => {
-    // Preço do item (considerando sabores de pizza e regra de precificação)
+  return order.items.reduce((acc, item: any) => {
     const itemPrice = calculateItemPrice(item);
-    // Complementos: suporta tanto orderItemComplements (backend) quanto complements (frontend)
-    let complementsTotal = 0;
-    const complements = item.complements || item.orderItemComplements;
-    if (complements && Array.isArray(complements)) {
-      complementsTotal += complements.reduce(
-        (compAcc: number, comp: any) => compAcc + (comp.price ?? 0) * comp.quantity,
-        0,
-      );
-    }
-    // O valor total do item é (preço do item + total dos complementos) * quantidade
+    const complements = item.complements || item.orderItemComplements || [];
+    const complementsTotal = complements.reduce(
+      (sum: number, c: any) => sum + (c.price ?? 0) * c.quantity,
+      0,
+    );
     return acc + (itemPrice + complementsTotal) * item.quantity;
   }, 0);
 }
@@ -83,244 +88,119 @@ function formatOrderMessage(
   order: OrderData,
   type: "ORDER_CREATED" | "ORDER_STATUS_UPDATED",
 ): string {
+  if (type === "ORDER_STATUS_UPDATED") {
+    if (order.status === "in_preparation") {
+      return "Agora vai! Seu pedido já está *em produção* 🥳";
+    }
+    if (order.status === "completed") {
+      return "Tô chegando! Seu pedido já está na rota de *entrega* 🛵";
+    }
+    return "";
+  }
+
   const total = calculateOrderTotal(order);
   const totalFormatted = (total / 100).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
   });
 
-  let message = "";
+  let msg = `Pedido *n° ${order.code}*\n\n*Itens:*\n`;
 
-  if (type === "ORDER_CREATED") {
-    message = `Pedido *n° ${order.code}*
+  for (const item of order.items) {
+    const q = item.quantity > 1 ? `${item.quantity}x ` : "";
+    msg += `📦 \`\`\`${q}${item.name}\`\`\`\n`;
 
-*Itens:*
-`;
-
-    for (const item of order.items) {
-      const itemQuantity = item.quantity > 1 ? `${item.quantity}x ` : "";
-      message += `📦 \`\`\`${itemQuantity}${item.name}\`\`\``;
-
-      // Sabores de pizza (pizzaFlavors ou orderItemPizzaFlavors)
-      const pizzaFlavors = (item as any)["pizzaFlavors"] || (item as any)["orderItemPizzaFlavors"];
-      if (pizzaFlavors && pizzaFlavors.length > 0) {
-        message += "\n     _Sabores_";
-        const fraction = `1/${pizzaFlavors.length}`;
-        for (const flavor of pizzaFlavors) {
-          message += `\n           \`\`\`${fraction} ${flavor.name}\`\`\``;
-        }
-      }
-
-      if (item.orderItemComplements && item.orderItemComplements.length > 0) {
-        message += "\n     _Complementos_";
-        for (const complement of item.orderItemComplements) {
-          const complementQuantity = complement.quantity > 1 ? `${complement.quantity}x ` : "";
-          message += `\n           \`\`\`${complementQuantity}${complement.name}\`\`\``;
-        }
-      }
-
-      if (item.notes) {
-        message += `\n\n*OBS:* ${item.notes}\n`;
-      }
-      message += "\n";
-    }
-
-    if (order.notes) {
-      message += `\n*OBS:* ${order.notes}`;
-    }
-
-    message += `${order.notes ? "\n" : ""}\n${
-      order.paymentMethod === "cash" || order.paymentMethod === "pix" ? "💵" : "💳"
-    } ${
-      order.paymentMethod === "cash"
-        ? order.change
-          ? `*Dinheiro (troco para ${(order.change / 100).toLocaleString("pt-BR", {
-              style: "currency",
-              currency: "BRL",
-            })})*`
-          : "*Dinheiro (não precisa de troco)*"
-        : order.paymentMethod === "pix"
-          ? "*Pix*"
-          : "*Cartão*"
-    }
-🛵 ${
-      order.deliveryMethodCode === "delivery"
-        ? "*Delivery*"
-        : order.deliveryMethodCode === "pickup"
-          ? "*Retirada no local*"
-          : "*Consumo no local*"
-    }
-
-Total *${totalFormatted}*
-
-Obrigado pela preferência, se precisar de algo é só chamar! 😉`;
-  } else if (type === "ORDER_STATUS_UPDATED") {
-    if (order.status === "in_preparation") {
-      message = "Agora vai! Seu pedido já está *em produção* 🥳";
-    } else if (order.status === "completed") {
-      message = "Tô chegando! Seu pedido já está na rota de *entrega* 🛵";
-    }
+    if (item.notes) msg += `*OBS:* ${item.notes}\n`;
+    msg += "\n";
   }
 
-  return message;
+  msg += `Total *${totalFormatted}*\n\nObrigado pela preferência! 😉`;
+  return msg;
 }
 
-async function sendMessage(
-  message: string,
-  customerPhone: string,
-  evolutionInstance: string,
-): Promise<void> {
-  const evolutionConfig = {
-    serverUrl: process.env.EVOLUTION_API_URL!,
-    apiKey: process.env.EVOLUTION_API_KEY!,
-    instance: evolutionInstance,
-  };
-
-  try {
-    await axios.post(
-      `${evolutionConfig.serverUrl}/message/sendText/${evolutionConfig.instance}`,
-      {
-        number: customerPhone,
-        text: message,
+async function sendMessage(message: string, customerPhone: string, evolutionInstance: string) {
+  await axios.post(
+    `${process.env.EVOLUTION_API_URL}/message/sendText/${evolutionInstance}`,
+    { number: customerPhone, text: message },
+    {
+      headers: {
+        apikey: process.env.EVOLUTION_API_KEY!,
+        "Content-Type": "application/json",
       },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          apikey: evolutionConfig.apiKey,
-        },
-      },
-    );
-  } catch (error: any) {
-    if (error.response) {
-      throw new Error(`Evolution API error: ${error.response.status} - ${error.response.data}`);
-    } else {
-      throw error;
-    }
-  }
+    },
+  );
 }
 
-function isTemporaryProviderError(error: any): boolean {
-  if (!error) return false;
-  if (error.name === "FetchError" || error.code === "ECONNRESET" || error.code === "ETIMEDOUT") {
-    return true;
-  }
-  if (typeof error.status === "number" && error.status >= 500) {
-    return true;
-  }
-  if (typeof error.message === "string") {
-    const msg = error.message.toLowerCase();
-    if (
-      msg.includes("timeout") ||
-      msg.includes("temporarily unavailable") ||
-      msg.includes("network")
-    ) {
-      return true;
-    }
-  }
+function isTemporaryProviderError(err: any): boolean {
+  if (!err) return false;
+  if (["ECONNRESET", "ETIMEDOUT", "EPIPE"].includes(err.code)) return true;
+  if (err.response?.status >= 500) return true;
   return false;
 }
 
-async function processOrderMessage(job: Job<OrderMessageJobData>): Promise<void> {
+/* =========================
+   Processor
+========================= */
+
+async function processOrderMessage(job: Job<OrderMessageJobData>) {
   const { order, type, evolutionInstance } = job.data;
 
-  await job.log(
-    `Starting processing for order ${order.code} of type ${type} and sequence ${job.data.sequence}`,
-  );
+  await job.log(`Processando pedido ${order.code} (${type})`);
 
   const message = formatOrderMessage(order, type);
 
-  let data;
   try {
-    const response = await axios.get(
-      `${process.env.EVOLUTION_API_URL}/instance/connectionState/${evolutionInstance}`,
-      {
-        headers: {
-          apikey: process.env.EVOLUTION_API_KEY!,
-        },
-      },
-    );
-    data = response.data;
-  } catch (error: any) {
-    if (error.response) {
-      const err = new Error(
-        `Evolution API error: ${error.response.status} - ${error.response.data}`,
-      );
-      (err as any).status = error.response.status;
-      throw err;
-    } else {
-      throw error;
-    }
-  }
-
-  if (!data?.instance.state || data.instance.state !== "open") {
-    await job.log(
-      `Evolution instance ${evolutionInstance} not ready, delaying job (order ${order.code}).`,
-    );
-    await job.updateProgress({ status: "waiting_instance" });
-    const delay = 60000 + Math.random() * 60000;
-    await job.moveToDelayed(Date.now() + delay);
-    return;
-  }
-
-  try {
-    await job.log(`Sending message for order ${order.code} to ${order.customerPhone}`);
     await sendMessage(message, order.customerPhone, evolutionInstance);
-    await job.log(`Message sent successfully for order ${order.code}`);
+    await job.log(`Mensagem enviada para ${order.customerPhone}`);
   } catch (err: any) {
     if (isTemporaryProviderError(err)) {
-      throw err;
+      throw err; // retry automático
     }
-    await job.log(`Message failed for order ${order.code}: ${err.message}`);
-    await job.moveToFailed(err, "message_send_failure");
+    throw new Error(`Falha permanente ao enviar mensagem: ${err.message}`);
   }
 }
 
-const queue = new Queue("message-processing", {
-  connection: redisConnection,
-});
+/* =========================
+   Worker
+========================= */
 
-export const messageWorker = new Worker("message-processing", processOrderMessage, {
-  connection: redisConnection,
-  concurrency: 1,
-  lockDuration: 60000,
-  autorun: true,
-  maxStalledCount: 2,
-});
+export const messageWorker = new Worker<OrderMessageJobData>(
+  "message-processing",
+  processOrderMessage,
+  {
+    connection: workerConnection,
+    concurrency: 1,
+    lockDuration: 60000,
+    maxStalledCount: 2,
+  },
+);
 
-messageWorker.on("completed", async () => {
-  const waiting = await queue.getWaitingCount();
-  const activer = await queue.getActiveCount();
-  const delayed = await queue.getDelayedCount();
+/* =========================
+   Eventos
+========================= */
 
-  if (waiting + activer + delayed === 0) {
-    console.log("Sem jobs — worker encerrado.");
-    await messageWorker.close();
-  }
+messageWorker.on("completed", (job) => {
+  console.log(`✅ Job ${job.id} concluído`);
 });
 
 messageWorker.on("failed", (job, err) => {
-  console.error(`Job ${job?.id} falhou:`, err.message);
+  console.error(`❌ Job ${job?.id} falhou:`, err.message);
 });
 
 messageWorker.on("error", (err) => {
-  console.error("Erro no worker:", err);
+  console.error("🔥 Erro no worker:", err);
 });
 
-process.on("SIGTERM", async () => {
+/* =========================
+   Graceful shutdown
+========================= */
+
+async function shutdown() {
+  console.log("Encerrando worker...");
   await messageWorker.close();
+  await workerConnection.quit();
   process.exit(0);
-});
+}
 
-process.on("SIGINT", async () => {
-  await messageWorker.close();
-  process.exit(0);
-});
-
-process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled Rejection:", reason);
-});
-
-process.on("uncaughtException", (error) => {
-  console.error("Uncaught Exception:", error);
-  process.exit(1);
-});
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
