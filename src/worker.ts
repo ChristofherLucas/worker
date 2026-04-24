@@ -24,6 +24,7 @@ interface OrderData {
   status: string;
   updatedAt: string | Date;
   deliveryMethodCode?: string | null;
+  deliveryFee?: number | null;
   items: OrderItem[];
 }
 
@@ -77,10 +78,34 @@ function formatOrderMessage(
   type: "ORDER_CREATED" | "ORDER_STATUS_UPDATED",
 ): string {
   const total = calculateOrderTotal(order);
-  const totalFormatted = (total / 100).toLocaleString("pt-BR", {
+  const deliveryFee = order.deliveryFee ?? 0;
+  const grandTotal = total + deliveryFee;
+  const totalFormatted = (grandTotal / 100).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
   });
+
+  const deliveryMethodLabel =
+    order.deliveryMethodCode === "delivery"
+      ? "Delivery"
+      : order.deliveryMethodCode === "pickup"
+        ? "Retirada"
+        : order.deliveryMethodCode || "";
+
+  const paymentMethodLabel =
+    order.paymentMethod === "cash"
+      ? "Dinheiro"
+      : order.paymentMethod === "credit_card"
+        ? "Cartão de Crédito"
+        : order.paymentMethod === "debit_card"
+          ? "Cartão de Débito"
+          : order.paymentMethod === "meal_voucher"
+            ? "Vale Refeição"
+            : order.paymentMethod === "food_voucher"
+              ? "Vale Alimentação"
+              : order.paymentMethod === "pix"
+                ? "Pix"
+                : order.paymentMethod || "";
 
   if (type === "ORDER_STATUS_UPDATED") {
     if (order.status === "in_production") {
@@ -126,7 +151,17 @@ function formatOrderMessage(
     message += `*OBS:* ${order.notes}\n\n`;
   }
 
-  message += `Total *${totalFormatted}*\n\nObrigado pela preferência! 😉`;
+  if (deliveryFee > 0) {
+    const deliveryFeeFormatted = (deliveryFee / 100).toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
+    message += `Entrega: *${deliveryFeeFormatted}*\n`;
+  }
+
+  message += `*Total: ${totalFormatted}*\n`;
+  message += `${paymentMethodLabel === "Dinheiro" ? "💵" : "💳"} *${paymentMethodLabel}*\n`;
+  message += `${deliveryMethodLabel === "Delivery" ? "🛵" : "🏠"} *${deliveryMethodLabel}*\n\nObrigado pela preferência! 😉`;
 
   return message;
 }
