@@ -8,9 +8,12 @@ interface OrderItem {
   price: number;
   notes?: string | null;
   orderItemComplements: {
-    quantity: number;
-    name: string;
-    price: number | null;
+    groupName: string;
+    items: {
+      quantity: number;
+      name: string;
+      price: number | null;
+    }[];
   }[];
 }
 
@@ -62,10 +65,16 @@ function calculateItemPrice(item: any): number {
 function calculateOrderTotal(order: OrderData): number {
   return order.items.reduce((acc: number, item: any) => {
     const itemPrice = calculateItemPrice(item);
-    const complements = item.complements || item.orderItemComplements || [];
+    const complements = item.orderItemComplements || [];
 
     const complementsTotal = complements.reduce(
-      (sum: number, c: any) => sum + (c.price ?? 0) * c.quantity,
+      (sum: number, group: any) => {
+        const groupItemsTotal = group.items.reduce(
+          (groupSum: number, c: any) => groupSum + (c.price ?? 0) * c.quantity,
+          0,
+        );
+        return sum + groupItemsTotal;
+      },
       0,
     );
 
@@ -133,10 +142,12 @@ function formatOrderMessage(
     }
 
     if (item.orderItemComplements?.length) {
-      message += "     _Complementos_\n";
-      for (const c of item.orderItemComplements) {
-        const cQty = c.quantity > 1 ? `${c.quantity}x ` : "";
-        message += `           \`\`\`${cQty}${c.name}\`\`\`\n`;
+      for (const group of item.orderItemComplements) {
+        message += `     _${group.groupName}_\n`;
+        for (const c of group.items) {
+          const cQty = c.quantity > 1 ? `${c.quantity}x ` : "";
+          message += `           \`\`\`${cQty}${c.name}\`\`\`\n`;
+        }
       }
     }
 
@@ -149,14 +160,6 @@ function formatOrderMessage(
 
   if (order.notes) {
     message += `*OBS:* ${order.notes}\n\n`;
-  }
-
-  if (deliveryFee > 0) {
-    const deliveryFeeFormatted = (deliveryFee / 100).toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-    message += `Entrega: *${deliveryFeeFormatted}*\n`;
   }
 
   message += `*Total: ${totalFormatted}*\n`;
