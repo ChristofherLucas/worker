@@ -119,7 +119,7 @@ function formatOrderMessage(
     }
 
     if (order.status === "ready_for_delivery") {
-      if (deliveryMethodLabel === "Delivery") {
+      if (deliveryMethodLabel === "Retirada") {
         return "Seu pedido já está *pronto para retirada*! Pode passar pra pegar.";
       }
       return "Tô chegando! Seu pedido já está na rota de *entrega* 🛵";
