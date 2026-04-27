@@ -67,16 +67,13 @@ function calculateOrderTotal(order: OrderData): number {
     const itemPrice = calculateItemPrice(item);
     const complements = item.orderItemComplements || [];
 
-    const complementsTotal = complements.reduce(
-      (sum: number, group: any) => {
-        const groupItemsTotal = group.items.reduce(
-          (groupSum: number, c: any) => groupSum + (c.price ?? 0) * c.quantity,
-          0,
-        );
-        return sum + groupItemsTotal;
-      },
-      0,
-    );
+    const complementsTotal = complements.reduce((sum: number, group: any) => {
+      const groupItemsTotal = group.items.reduce(
+        (groupSum: number, c: any) => groupSum + (c.price ?? 0) * c.quantity,
+        0,
+      );
+      return sum + groupItemsTotal;
+    }, 0);
 
     return acc + (itemPrice + complementsTotal) * item.quantity;
   }, 0);
@@ -120,7 +117,11 @@ function formatOrderMessage(
     if (order.status === "in_production") {
       return "Agora vai! Seu pedido já está *em produção* 🥳";
     }
-    if (order.status === "completed") {
+
+    if (order.status === "ready_for_delivery") {
+      if (deliveryMethodLabel === "Delivery") {
+        return "Seu pedido já está *pronto para retirada*! Pode passar pra pegar.";
+      }
       return "Tô chegando! Seu pedido já está na rota de *entrega* 🛵";
     }
     return "";
