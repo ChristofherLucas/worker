@@ -86,9 +86,8 @@ function formatOrderMessage(
   order: OrderData,
   type: "ORDER_CREATED" | "ORDER_STATUS_UPDATED",
 ): string {
-  const total = order.total ?? calculateOrderTotal(order);
   const deliveryFee = order.deliveryFee ?? 0;
-  const grandTotal = total + deliveryFee;
+  const grandTotal = order.total ?? calculateOrderTotal(order) + deliveryFee;
   const totalFormatted = (grandTotal / 100).toLocaleString("pt-BR", {
     style: "currency",
     currency: "BRL",
