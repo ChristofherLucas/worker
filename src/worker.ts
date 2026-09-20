@@ -9,6 +9,8 @@ interface OrderItem {
   notes?: string | null;
   orderItemComplements: {
     groupName: string;
+    groupId?: string;
+    pricing?: string;
     items: {
       quantity: number;
       name: string;
@@ -28,6 +30,7 @@ interface OrderData {
   updatedAt: string | Date;
   deliveryMethodCode?: string | null;
   deliveryFee?: number | null;
+  total?: number;
   items: OrderItem[];
 }
 
@@ -83,7 +86,7 @@ function formatOrderMessage(
   order: OrderData,
   type: "ORDER_CREATED" | "ORDER_STATUS_UPDATED",
 ): string {
-  const total = calculateOrderTotal(order);
+  const total = order.total ?? calculateOrderTotal(order);
   const deliveryFee = order.deliveryFee ?? 0;
   const grandTotal = total + deliveryFee;
   const totalFormatted = (grandTotal / 100).toLocaleString("pt-BR", {
