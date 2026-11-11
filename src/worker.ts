@@ -257,11 +257,11 @@ export const worker = new Worker("message-processing", processOrderMessage, {
 });
 
 worker.on("completed", (job) => {
-  console.log(`Job ${job} completed`);
+  console.log(`Job ${JSON.stringify(job)} completed`);
 });
 
 worker.on("failed", (job, err) => {
-  console.error(`Job ${job} failed:`, err.message);
+  console.error(`Job ${JSON.stringify(job)} failed:`, err.message);
 });
 
 worker.on("error", (err) => {
