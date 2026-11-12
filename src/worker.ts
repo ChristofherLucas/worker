@@ -257,11 +257,16 @@ export const worker = new Worker("message-processing", processOrderMessage, {
 });
 
 worker.on("completed", (job) => {
-  console.log(`Job ${JSON.stringify(job)} completed`);
+  console.log(
+    `Job ${JSON.stringify({ telephone: job?.data.order.customerPhone, instance: job?.data.evolutionInstance })} completed`,
+  );
 });
 
 worker.on("failed", (job, err) => {
-  console.error(`Job ${JSON.stringify(job)} failed:`, err.message);
+  console.error(
+    `Job ${JSON.stringify({ telephone: job?.data.order.customerPhone, instance: job?.data.evolutionInstance })} failed:`,
+    err.message,
+  );
 });
 
 worker.on("error", (err) => {
