@@ -129,7 +129,7 @@ function formatOrderMessage(
     return "";
   }
 
-  let message = `Pedido *n° ${order.code}*\n\n*Itens:*\n`;
+  let message = `Pedido *n° ${order.code}* - *${order.customerName}* \n\n*Itens:*\n`;
 
   for (const item of order.items) {
     const qty = item.quantity > 1 ? `${item.quantity}x ` : "";
