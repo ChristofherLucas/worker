@@ -144,7 +144,7 @@ function formatOrderMessage(
     return "";
   }
 
-  let message = `Olá *${order.customerName}*, seu pedido *n° ${order.code}* foi confirmado! -  \n\n*Itens:*\n`;
+  let message = `Olá *${order.customerName}*, seu pedido de \`\`\`n° ${order.code}\`\`\`\ ** foi confirmado!  \n\n*Itens:*\n`;
 
   for (const item of order.items) {
     const qty = item.quantity > 1 ? `${item.quantity}x ` : "";
@@ -171,18 +171,18 @@ function formatOrderMessage(
   if (isDelivery) {
     message +=
       deliveryFee > 0
-        ? ` Taxa de entrega: *${formatCurrency(deliveryFee)}*\n`
-        : " Taxa de entrega: *Grátis*\n";
+        ? `Taxa de entrega: *${formatCurrency(deliveryFee)}*\n`
+        : "Taxa de entrega: *Grátis*\n";
   }
 
-  message += `*Total: ${totalFormatted}*\n`;
+  message += `*Total: ${totalFormatted}*\n\n`;
   message += `${paymentMethodLabel === "Dinheiro" ? "💵" : "💳"} *${paymentMethodLabel}*\n`;
-  message += `${isDelivery ? "🛵" : "🏠"} *${deliveryMethodLabel}*\n`;
+  message += `${isDelivery ? "🛵" : "🏠"} *${deliveryMethodLabel}*\n\n`;
 
   const estimate = isDelivery ? formatDeliveryEstimate(order.minimumTime, order.maximumTime) : null;
 
   if (estimate) {
-    message += `⏱️ Tempo estimado de entrega: *${estimate}*\n`;
+    message += `⏱️ Tempo até entrega: *${estimate}*\n`;
   }
 
   message += "\nObrigado pela preferência! 😉";
