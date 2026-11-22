@@ -179,7 +179,7 @@ function formatOrderMessage(
   message += `${paymentMethodLabel === "Dinheiro" ? "💵" : "💳"} *${paymentMethodLabel}*\n`;
   message += `${isDelivery ? "🛵" : "🏠"} *${deliveryMethodLabel}*\n\n`;
 
-  const estimate = isDelivery ? formatDeliveryEstimate(order.minimumTime, order.maximumTime) : null;
+  const estimate = formatDeliveryEstimate(order.minimumTime, order.maximumTime);
 
   if (estimate) {
     message += `⏱️ Tempo até entrega: *${estimate}*\n`;
