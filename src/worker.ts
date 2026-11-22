@@ -30,6 +30,9 @@ interface OrderData {
   updatedAt: string | Date;
   deliveryMethodCode?: string | null;
   deliveryFee?: number | null;
+  // Tempo estimado de entrega, em minutos. Precisa vir no payload do job.
+  minimumTime?: number | null;
+  maximumTime?: number | null;
   total?: number;
   items: OrderItem[];
 }
@@ -82,16 +85,28 @@ function calculateOrderTotal(order: OrderData): number {
   }, 0);
 }
 
+// Valores monetários chegam em centavos.
+function formatCurrency(cents: number): string {
+  return (cents / 100).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
+// 40 e 50 -> "40 a 50 min" | só um valor -> "40 min" | nenhum -> null
+function formatDeliveryEstimate(min?: number | null, max?: number | null): string | null {
+  if (min && max && min !== max) return `${min} a ${max} min`;
+  const single = max ?? min;
+  return single ? `${single} min` : null;
+}
+
 function formatOrderMessage(
   order: OrderData,
   type: "ORDER_CREATED" | "ORDER_STATUS_UPDATED",
 ): string {
   const deliveryFee = order.deliveryFee ?? 0;
   const grandTotal = order.total ?? calculateOrderTotal(order) + deliveryFee;
-  const totalFormatted = (grandTotal / 100).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  });
+  const totalFormatted = formatCurrency(grandTotal);
 
   const deliveryMethodLabel =
     order.deliveryMethodCode === "delivery"
@@ -129,24 +144,14 @@ function formatOrderMessage(
     return "";
   }
 
-  let message = `Pedido *n° ${order.code}* - *${order.customerName}* \n\n*Itens:*\n`;
+  let message = `Olá *${order.customerName}*, seu pedido *n° ${order.code}* foi confirmado! -  \n\n*Itens:*\n`;
 
   for (const item of order.items) {
     const qty = item.quantity > 1 ? `${item.quantity}x ` : "";
     message += `📦 \`\`\`${qty}${item.name}\`\`\`\n`;
 
-    const flavors = (item as any).pizzaFlavors || (item as any).orderItemPizzaFlavors;
-    if (flavors?.length) {
-      message += "     _Sabores_\n";
-      const fraction = `1/${flavors.length}`;
-      for (const f of flavors) {
-        message += `           \`\`\`${fraction} ${f.name}\`\`\`\n`;
-      }
-    }
-
     if (item.orderItemComplements?.length) {
       for (const group of item.orderItemComplements) {
-        message += `     _${group.groupName}_\n`;
         for (const c of group.items) {
           const cQty = c.quantity > 1 ? `${c.quantity}x ` : "";
           message += `           \`\`\`${cQty}${c.name}\`\`\`\n`;
@@ -161,13 +166,26 @@ function formatOrderMessage(
     message += "\n";
   }
 
-  if (order.notes) {
-    message += `*OBS:* ${order.notes}\n\n`;
+  const isDelivery = deliveryMethodLabel === "Delivery";
+
+  if (isDelivery) {
+    message +=
+      deliveryFee > 0
+        ? ` Taxa de entrega: *${formatCurrency(deliveryFee)}*\n`
+        : " Taxa de entrega: *Grátis*\n";
   }
 
   message += `*Total: ${totalFormatted}*\n`;
   message += `${paymentMethodLabel === "Dinheiro" ? "💵" : "💳"} *${paymentMethodLabel}*\n`;
-  message += `${deliveryMethodLabel === "Delivery" ? "🛵" : "🏠"} *${deliveryMethodLabel}*\n\nObrigado pela preferência! 😉`;
+  message += `${isDelivery ? "🛵" : "🏠"} *${deliveryMethodLabel}*\n`;
+
+  const estimate = isDelivery ? formatDeliveryEstimate(order.minimumTime, order.maximumTime) : null;
+
+  if (estimate) {
+    message += `⏱️ Tempo estimado de entrega: *${estimate}*\n`;
+  }
+
+  message += "\nObrigado pela preferência! 😉";
 
   return message;
 }
