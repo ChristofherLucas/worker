@@ -136,7 +136,7 @@ function formatOrderMessage(
     }
 
     if (order.status === "ready_for_delivery") {
-      if (deliveryMethodLabel === "Retirada") {
+      if (deliveryMethodLabel === "Retirar") {
         return "Seu pedido já está *pronto para retirada*! Pode passar pra pegar.";
       }
       return "Tô chegando! Seu pedido já está na rota de *entrega* 🛵";
@@ -166,7 +166,7 @@ function formatOrderMessage(
     message += "\n";
   }
 
-  const isDelivery = deliveryMethodLabel === "Delivery";
+  const isDelivery = deliveryMethodLabel === "Entregar";
 
   if (isDelivery) {
     message +=
